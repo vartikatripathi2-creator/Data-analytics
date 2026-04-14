@@ -1,0 +1,120 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 5,
+  "metadata": {
+    "colab": {
+      "name": "born_into_burden_colab_rebuild.ipynb",
+      "provenance": []
+    },
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "name": "python",
+      "version": "3.11"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "# Born Into Burden \u2014 Reproducible Analysis Notebook\n\n## Objective\nThis notebook reproduces the analysis presented in the HTML report by rebuilding all figures directly from raw datasets.\n\n## Research Question\nDoes low handwashing access correlate with higher dependency burden and lower life expectancy?\n\n## Datasets Used\n- UNICEF Indicator 1: Handwashing access\n- UNICEF Indicator 2: Dependency ratio\n- World Bank Metadata: Life expectancy\n\n## Method Overview\n- Filter to 2022 for cross-sectional analysis\n- Merge datasets using ISO alpha-3 country codes\n- Create matched dataset (103 countries)\n- Generate 4 figures:\n  1. World map\n  2. Life expectancy comparison\n  3. Dependency vs hygiene scatter\n  4. Regional time trends\n"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "# Born Into Burden \u2014 Colab notebook rebuild\n\nThis notebook **recreates the analysis and charts directly from the CSV files** so it can be run in **Google Colab** without copying the HTML output.\n\n## What this notebook does\n- loads the 3 uploaded datasets\n- rebuilds the 2022 matched comparison sample\n- validates the report's headline numbers\n- recreates the 4 report figures from data\n\n## Important note\nThis notebook is designed to reproduce the **same analytical results and equivalent visuals** as the HTML preview. Minor pixel-level differences can still happen across environments because map geometry sources, fonts, package versions, and rendering engines can differ.\n"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Colab setup\n!pip -q install geopandas==0.14.4 shapely==2.0.4 pyogrio==0.9.0 matplotlib==3.8.4 pandas==2.2.2 numpy==1.26.4"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "from pathlib import Path\nimport warnings\nwarnings.filterwarnings(\"ignore\")\n\nimport numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\nfrom matplotlib.patches import Patch\nimport geopandas as gpd\n\nplt.rcParams[\"figure.dpi\"] = 150\nplt.rcParams[\"savefig.dpi\"] = 150\nplt.rcParams[\"axes.titlesize\"] = 16\nplt.rcParams[\"axes.labelsize\"] = 12\nplt.rcParams[\"font.family\"] = \"DejaVu Serif\"\n\nDATA_DIR = Path(\".\")  # In Colab, upload the three CSVs into the working directory\n\nIND1_PATH = DATA_DIR / \"unicef_indicator_1.csv\"\nIND2_PATH = DATA_DIR / \"unicef_indicator_2.csv\"\nMETA_PATH = DATA_DIR / \"unicef_metadata.csv\"\n\nfor p in [IND1_PATH, IND2_PATH, META_PATH]:\n    if not p.exists():\n        raise FileNotFoundError(f\"Missing file: {p.name}. Upload it to the Colab session first.\")\n\nprint(\"Files found:\", IND1_PATH.name, IND2_PATH.name, META_PATH.name)"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Load data\nind1_raw = pd.read_csv(IND1_PATH)\nind2_raw = pd.read_csv(IND2_PATH)\nmeta_raw = pd.read_csv(META_PATH)\n\nprint(\"indicator_1 shape:\", ind1_raw.shape)\nprint(\"indicator_2 shape:\", ind2_raw.shape)\nprint(\"metadata shape   :\", meta_raw.shape)"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Data preparation: recreate the matched 2022 sample used across Figures 1\u20133\nq_order = [\"Q1 (0-15%)\", \"Q2 (15-40%)\", \"Q3 (40-65%)\", \"Q4 (65-85%)\", \"Q5 (85-100%)\"]\n\nhw_all = (\n    ind1_raw.loc[ind1_raw[\"sex\"] == \"Total\", [\"country\", \"alpha_3_code\", \"time_period\", \"obs_value\"]]\n    .rename(columns={\"time_period\": \"year\", \"obs_value\": \"handwashing_pct\"})\n    .copy()\n)\n\ndep_2022 = (\n    ind2_raw.loc[(ind2_raw[\"time_period\"] == 2022) & (ind2_raw[\"sex\"] == \"Total\"), [\"alpha_3_code\", \"obs_value\"]]\n    .rename(columns={\"obs_value\": \"dep_ratio\"})\n    .copy()\n)\n\nle_2022 = (\n    meta_raw.loc[meta_raw[\"year\"] == 2022, [\"alpha_3_code\", \"Life expectancy at birth, total (years)\"]]\n    .rename(columns={\"Life expectancy at birth, total (years)\": \"life_exp\"})\n    .dropna(subset=[\"life_exp\"])\n    .copy()\n)\n\nmerged_2022 = (\n    hw_all.loc[hw_all[\"year\"] == 2022]\n    .merge(dep_2022, on=\"alpha_3_code\", how=\"inner\")\n    .merge(le_2022, on=\"alpha_3_code\", how=\"inner\")\n    .copy()\n)\n\nbins = [-np.inf, 15.0, 40.0, 65.0, 85.0, np.inf]\nmerged_2022[\"hw_band\"] = pd.cut(\n    merged_2022[\"handwashing_pct\"],\n    bins=bins,\n    labels=q_order,\n    include_lowest=True,\n    right=True,\n)\n\nprint(\"Matched 2022 sample:\", len(merged_2022), \"countries\")\nmerged_2022.head()"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Validation against the report's headline values\nsummary = {}\nsummary[\"matched_2022_countries\"] = int(len(merged_2022))\n\nlowest_row = merged_2022.loc[merged_2022[\"handwashing_pct\"].idxmin()]\nsummary[\"lowest_country\"] = str(lowest_row[\"country\"])\nsummary[\"lowest_handwashing_pct\"] = float(lowest_row[\"handwashing_pct\"])\nsummary[\"lowest_country_life_exp\"] = float(lowest_row[\"life_exp\"])\n\nlife_by_band = (\n    merged_2022.groupby(\"hw_band\", observed=False)[\"life_exp\"]\n    .mean()\n    .reindex(q_order)\n)\n\nsummary[\"life_expectancy_by_band\"] = {k: float(v) for k, v in life_by_band.items()}\nsummary[\"life_expectancy_gap_q5_minus_q1\"] = float(life_by_band.iloc[-1] - life_by_band.iloc[0])\nsummary[\"dependency_handwashing_correlation\"] = float(\n    merged_2022[\"dep_ratio\"].corr(merged_2022[\"handwashing_pct\"])\n)\n\ndisplay(pd.DataFrame(\n    {\n        \"metric\": [\n            \"matched_2022_countries\",\n            \"lowest_country\",\n            \"lowest_handwashing_pct\",\n            \"lowest_country_life_exp\",\n            \"life_expectancy_gap_q5_minus_q1\",\n            \"dependency_handwashing_correlation\",\n        ],\n        \"value\": [\n            summary[\"matched_2022_countries\"],\n            summary[\"lowest_country\"],\n            round(summary[\"lowest_handwashing_pct\"], 3),\n            round(summary[\"lowest_country_life_exp\"], 3),\n            round(summary[\"life_expectancy_gap_q5_minus_q1\"], 3),\n            round(summary[\"dependency_handwashing_correlation\"], 6),\n        ],\n    }\n))\n\nassert summary[\"matched_2022_countries\"] == 103\nassert summary[\"lowest_country\"] == \"Liberia\"\nassert round(summary[\"lowest_handwashing_pct\"], 1) == 3.4\nassert round(summary[\"dependency_handwashing_correlation\"], 2) == -0.77\n\nprint(\"Validation checks passed.\")"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Region helper logic for scatterplot and time series\ndef assign_region_from_iso(iso):\n    south_asia = {\"AFG\", \"BGD\", \"BTN\", \"IND\", \"LKA\", \"MDV\", \"NPL\", \"PAK\"}\n    mena = {\n        \"DZA\", \"BHR\", \"DJI\", \"EGY\", \"IRN\", \"IRQ\", \"ISR\", \"JOR\", \"KWT\", \"LBN\",\n        \"LBY\", \"MAR\", \"OMN\", \"PSE\", \"QAT\", \"SAU\", \"SYR\", \"TUN\", \"ARE\", \"YEM\"\n    }\n    europe_central_asia_extra = {\n        \"ARM\", \"AZE\", \"GEO\", \"KAZ\", \"KGZ\", \"TJK\", \"TKM\", \"UZB\", \"TUR\"\n    }\n    north_america = {\"USA\", \"CAN\"}\n    world_continent_map = world_gdf.set_index(\"iso_a3\")[\"continent\"].to_dict()\n\n    if iso in south_asia:\n        return \"South Asia\"\n    if iso in mena:\n        return \"Middle East & North Africa\"\n    if iso in europe_central_asia_extra:\n        return \"Europe & Central Asia\"\n    if iso in north_america:\n        return \"North America\"\n\n    continent = world_continent_map.get(iso, None)\n    if continent == \"Africa\":\n        return \"Sub-Saharan Africa\"\n    if continent == \"Europe\":\n        return \"Europe & Central Asia\"\n    if continent == \"Asia\":\n        return \"East Asia & Pacific\"\n    if continent == \"South America\":\n        return \"Latin America & Caribbean\"\n    if continent == \"North America\":\n        return \"Latin America & Caribbean\"\n    if continent == \"Oceania\":\n        return \"East Asia & Pacific\"\n    return \"Other\"\n\nMAP_FILL = {\n    \"Q1 (0-15%)\": \"#d73027\",\n    \"Q2 (15-40%)\": \"#fc8d59\",\n    \"Q3 (40-65%)\": \"#fee090\",\n    \"Q4 (65-85%)\": \"#91cf60\",\n    \"Q5 (85-100%)\": \"#1a9850\",\n    \"No data\": \"#cccccc\",\n}\n\nREGION_COLOURS = {\n    \"Sub-Saharan Africa\": \"#c44e52\",\n    \"South Asia\": \"#dd8452\",\n    \"Middle East & North Africa\": \"#55a868\",\n    \"Europe & Central Asia\": \"#4c72b0\",\n    \"East Asia & Pacific\": \"#8172b2\",\n    \"Latin America & Caribbean\": \"#937860\",\n    \"North America\": \"#64b5cd\",\n    \"Other\": \"#999999\",\n}"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Load world geometry\ntry:\n    world_gdf = gpd.read_file(gpd.datasets.get_path(\"naturalearth_lowres\"))\nexcept Exception:\n    world_gdf = gpd.read_file(\n        \"https://naciscdn.org/naturalearth/110m/cultural/ne_110m_admin_0_countries.zip\"\n    )\n\nworld_gdf = world_gdf[world_gdf[\"name\"] != \"Antarctica\"].copy()\nworld_gdf[\"region\"] = world_gdf[\"iso_a3\"].apply(assign_region_from_iso)\n\nmerged_2022[\"region\"] = merged_2022[\"alpha_3_code\"].apply(assign_region_from_iso)\n\nprint(sorted(merged_2022[\"region\"].dropna().unique()))"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Figure 1 \u2014 World map of handwashing access\nworld_map = world_gdf.merge(\n    merged_2022[[\"alpha_3_code\", \"handwashing_pct\", \"hw_band\"]],\n    left_on=\"iso_a3\",\n    right_on=\"alpha_3_code\",\n    how=\"left\",\n)\n\nworld_map[\"fill_group\"] = world_map[\"hw_band\"].astype(object).fillna(\"No data\")\n\nfig, ax = plt.subplots(figsize=(14, 7))\nworld_map.plot(\n    ax=ax,\n    color=world_map[\"fill_group\"].map(MAP_FILL),\n    edgecolor=\"white\",\n    linewidth=0.25,\n)\n\nax.set_title(\"Figure 1. Global Handwashing Access, 2022\", pad=14)\nax.set_axis_off()\n\nlegend_handles = [Patch(facecolor=MAP_FILL[k], edgecolor=\"none\", label=k) for k in MAP_FILL]\nax.legend(\n    handles=legend_handles,\n    title=\"Access level\",\n    loc=\"lower left\",\n    bbox_to_anchor=(0.01, 0.02),\n    frameon=True,\n)\n\nplt.tight_layout()\nplt.show()"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Figure 2 \u2014 Average life expectancy by handwashing-access band\nqs = (\n    merged_2022.groupby(\"hw_band\", observed=False)[\"life_exp\"]\n    .mean()\n    .reindex(q_order)\n    .reset_index()\n)\nqs.columns = [\"hw_band\", \"avg_life_exp\"]\nqs[\"bar_label\"] = qs[\"avg_life_exp\"].round(1).astype(str) + \" yrs\"\n\nglobal_avg = float(merged_2022[\"life_exp\"].mean())\n\nfig, ax = plt.subplots(figsize=(10, 5.5))\nbars = ax.bar(qs[\"hw_band\"], qs[\"avg_life_exp\"], edgecolor=\"black\")\n\nax.axhline(global_avg, linestyle=\"--\", linewidth=1.25)\nax.set_title(\"Figure 2. Average Life Expectancy by Handwashing Access Band (2022)\")\nax.set_xlabel(\"Handwashing access band\")\nax.set_ylabel(\"Life expectancy at birth (years)\")\nax.set_ylim(0, max(qs[\"avg_life_exp\"].max() + 10, 80))\n\nfor rect, label in zip(bars, qs[\"bar_label\"]):\n    ax.text(\n        rect.get_x() + rect.get_width() / 2,\n        rect.get_height() + 0.6,\n        label,\n        ha=\"center\",\n        va=\"bottom\",\n        fontsize=10,\n    )\n\nax.text(\n    len(qs) - 0.2,\n    global_avg + 0.5,\n    f\"Dataset average = {global_avg:.1f}\",\n    ha=\"right\",\n    va=\"bottom\",\n    fontsize=10,\n)\n\nplt.xticks(rotation=0)\nplt.tight_layout()\nplt.show()\n\ndisplay(qs)"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Figure 3 \u2014 Dependency\u2013hygiene scatterplot with regression\nscatter_df = merged_2022.copy()\ncorr_r = scatter_df[\"dep_ratio\"].corr(scatter_df[\"handwashing_pct\"])\n\nlabel_countries = [\"Liberia\", \"Qatar\", \"Nigeria\", \"India\", \"Bangladesh\", \"Ethiopia\"]\nlabels_df = scatter_df[scatter_df[\"country\"].isin(label_countries)].copy()\n\nnudge = {\n    \"Liberia\": (1.5, 4),\n    \"Qatar\": (-5, -5),\n    \"Nigeria\": (1.5, 3),\n    \"India\": (1.5, -5),\n    \"Bangladesh\": (1.5, 3),\n    \"Ethiopia\": (1.5, 3),\n}\n\nx = scatter_df[\"dep_ratio\"].to_numpy()\ny = scatter_df[\"handwashing_pct\"].to_numpy()\nm, b = np.polyfit(x, y, 1)\nx_line = np.linspace(x.min(), x.max(), 200)\ny_line = m * x_line + b\n\nfig, ax = plt.subplots(figsize=(10, 6))\n\nfor region, group in scatter_df.groupby(\"region\"):\n    ax.scatter(\n        group[\"dep_ratio\"],\n        group[\"handwashing_pct\"],\n        s=45,\n        alpha=0.72,\n        label=region,\n        color=REGION_COLOURS.get(region, \"#999999\"),\n    )\n\nax.plot(x_line, y_line, linestyle=\"--\", linewidth=1.5, color=\"black\")\n\nfor _, row in labels_df.iterrows():\n    dx, dy = nudge.get(row[\"country\"], (1.5, 0))\n    ax.text(\n        row[\"dep_ratio\"] + dx,\n        row[\"handwashing_pct\"] + dy,\n        row[\"country\"],\n        fontsize=9,\n        style=\"italic\",\n    )\n\nax.set_title(f\"Figure 3. The Dependency\u2013Hygiene Nexus (r = {corr_r:.2f})\")\nax.set_xlabel(\"Dependency ratio\")\nax.set_ylabel(\"Handwashing access (%)\")\nax.legend(title=\"Region\", bbox_to_anchor=(1.02, 1), loc=\"upper left\")\nplt.tight_layout()\nplt.show()"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Figure 4 \u2014 Progress in the most affected region\n# Rebuild a time series using yearly country-level handwashing data,\n# then compare Sub-Saharan Africa with the full global sample.\n\nhw_ts = hw_all.copy()\nhw_ts[\"region\"] = hw_ts[\"alpha_3_code\"].apply(assign_region_from_iso)\n\nregion_year = (\n    hw_ts.groupby([\"region\", \"year\"], as_index=False)[\"handwashing_pct\"]\n    .mean()\n)\n\nworld_year = (\n    hw_ts.groupby(\"year\", as_index=False)[\"handwashing_pct\"]\n    .mean()\n    .assign(region=\"World\")\n)\n\ntrend_df = pd.concat(\n    [\n        region_year.loc[region_year[\"region\"] == \"Sub-Saharan Africa\"],\n        world_year,\n    ],\n    ignore_index=True,\n)\n\nfig, ax = plt.subplots(figsize=(10, 5.5))\n\nfor region_name, df_plot in trend_df.groupby(\"region\"):\n    ax.plot(\n        df_plot[\"year\"],\n        df_plot[\"handwashing_pct\"],\n        linewidth=2.2,\n        label=region_name,\n    )\n\nlatest = trend_df.sort_values(\"year\").groupby(\"region\").tail(1)\nfor _, row in latest.iterrows():\n    ax.text(row[\"year\"] + 0.2, row[\"handwashing_pct\"], row[\"region\"], fontsize=10, va=\"center\")\n\nax.set_title(\"Figure 4. Progress Not Fast Enough\")\nax.set_xlabel(\"Year\")\nax.set_ylabel(\"Average handwashing access (%)\")\nax.set_xlim(hw_ts[\"year\"].min(), hw_ts[\"year\"].max() + 1)\nax.legend().remove()\nplt.tight_layout()\nplt.show()\n\ndisplay(\n    trend_df.sort_values([\"region\", \"year\"]).groupby(\"region\").tail(5).reset_index(drop=True)\n)"
+    },
+    {
+      "cell_type": "code",
+      "metadata": {},
+      "execution_count": null,
+      "outputs": [],
+      "source": "# Optional: save the figures if you want separate image files\n# Re-run the plotting cells and add plt.savefig(\"filename.png\", bbox_inches=\"tight\") before plt.show().\n\nprint(\"Notebook complete. The figures above are recreated directly from the CSV files.\")"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "## Key Findings\n\n- Countries with low handwashing access consistently show:\n  - Higher dependency ratios\n  - Lower life expectancy\n- The correlation between dependency burden and hygiene access is strongly negative (~ -0.77)\n- A gap of ~10 years exists between lowest and highest access groups\n- Progress remains slow in Sub-Saharan Africa\n\n## Conclusion\nThe results confirm that access to basic hygiene infrastructure is strongly associated with broader demographic and health inequalities.\n\n## Reproducibility Note\nAll figures in this notebook are generated directly from the CSV datasets. Running this notebook in Google Colab with the same files will reproduce the same analytical results.\n"
+    }
+  ]
+}
